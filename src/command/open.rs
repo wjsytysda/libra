@@ -36,6 +36,9 @@ pub struct OpenArgs {
     /// Remote name (e.g. `origin`) or a direct URL. Omit to auto-detect from the current branch's upstream
     #[arg(value_name = "REMOTE_OR_URL")]
     pub remote: Option<String>,
+
+    #[arg(long)]
+    pub print_only: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -90,6 +93,7 @@ pub async fn execute(args: OpenArgs) {
 /// errors and exiting. Resolves the remote URL and opens it in the default
 /// browser.
 pub async fn execute_safe(args: OpenArgs, output: &OutputConfig) -> CliResult<()> {
+    let is_print_only = args.print_only;
     let in_repo = require_repo().is_ok();
     let resolution = resolve_open_target(args, in_repo)
         .await
@@ -98,6 +102,11 @@ pub async fn execute_safe(args: OpenArgs, output: &OutputConfig) -> CliResult<()
 
     if !is_safe_url(&web_url) {
         return Err(open_cli_error(OpenError::UnsafeUrl(web_url)));
+    }
+
+    if is_print_only {
+        println!("{}", web_url);
+        return Ok(());
     }
 
     let launched = if output.is_json() {
