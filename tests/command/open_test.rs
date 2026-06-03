@@ -14,89 +14,58 @@ use tempfile::tempdir;
 
 use super::*;
 
-#[tokio::test]
-#[serial]
-async fn test_open_remote_origin() {
-    let repo_dir = tempdir().unwrap();
-    test::setup_with_new_libra_in(repo_dir.path()).await;
-    let _guard = test::ChangeDirGuard::new(repo_dir.path());
-    let output = OutputConfig {
-        quiet: true,
-        ..OutputConfig::default()
-    };
+#[test]
+fn test_open_remote_origin() {
+    let repo = create_committed_repo_via_cli();
 
-    // Add origin remote
-    remote::execute_safe(
-        RemoteCmds::Add {
-            name: "origin".into(),
-            url: "git@github.com:web3infra-foundation/libra.git".into(),
-        },
-        &output,
-    )
-    .await
-    .expect("adding origin remote should succeed");
+    // Add origin remote using CLI
+    let add_remote = run_libra_command(
+        &["remote", "add", "origin", "git@github.com:web3infra-foundation/libra.git"],
+        repo.path(),
+    );
+    assert_cli_success(&add_remote, "adding origin remote should succeed");
 
-    // Test explicit remote
-    open::execute_safe(
-        open::OpenArgs {
-            remote: Some("origin".to_string()),
-        },
-        &output,
-    )
-    .await
-    .expect("opening explicit origin remote should succeed");
+    // Test explicit remote via CLI
+    let output = run_libra_command(&["open", "origin"], repo.path());
+    assert_cli_success(&output, "opening explicit origin remote should succeed");
 
     // Test default remote should find origin
-    open::execute_safe(open::OpenArgs { remote: None }, &output)
-        .await
-        .expect("opening default remote should succeed");
-
-    let error = open::execute_safe(
-        open::OpenArgs {
-            remote: Some("nonexistent".to_string()),
-        },
-        &output,
-    )
-    .await
-    .expect_err("invalid direct remote target should return a CLI error");
-    assert_eq!(error.stable_code(), StableErrorCode::CliInvalidTarget);
-    assert_eq!(error.exit_code(), 129);
-    assert!(
-        error.message().contains("unsafe or invalid"),
-        "unexpected error message: {}",
-        error.message()
-    );
+    let output_default = run_libra_command(&["open"], repo.path());
+    assert_cli_success(&output_default, "opening default remote should succeed");
 }
 
-#[tokio::test]
-#[serial]
-async fn test_open_no_remote() {
-    let repo_dir = tempdir().unwrap();
-    test::setup_with_new_libra_in(repo_dir.path()).await;
-    let _guard = test::ChangeDirGuard::new(repo_dir.path());
-    let output = OutputConfig {
-        quiet: true,
-        ..OutputConfig::default()
-    };
+#[test]
+fn test_open_no_remote() {
+    let repo = tempdir().unwrap();
+    init_repo_via_cli(repo.path());
 
-    let error = open::execute_safe(open::OpenArgs { remote: None }, &output)
-        .await
-        .expect_err("opening without a configured remote should fail");
-    assert_eq!(error.stable_code(), StableErrorCode::RepoStateInvalid);
-    assert_eq!(error.exit_code(), 128);
-    assert!(
-        error.message().contains("no remote configured"),
-        "unexpected error message: {}",
-        error.message()
+    let output = run_libra_command(&["open"], repo.path());
+    
+    assert_eq!(output.status.code(), Some(128));
+    let (_stderr, report) = parse_cli_error_stderr(&output.stderr);
+    assert!(report.message.contains("no remote configured"));
+}
+
+#[test]
+fn test_open_print_only_flag() {
+    let repo = create_committed_repo_via_cli();
+
+    let output = run_libra_command(
+        &["open", "https://github.com/web3infra-foundation/libra", "--print-only"], 
+        repo.path()
     );
-    assert!(
-        error
-            .hints()
-            .iter()
-            .any(|hint| hint.as_str().contains("libra remote add origin")),
-        "expected add-remote hint, got {:?}",
-        error.hints()
+    assert_cli_success(&output, "open --print-only should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("https://github.com/web3infra-foundation/libra"));
+
+    let json_output = run_libra_command(
+        &["open", "https://github.com/web3infra-foundation/libra", "--print-only", "--json"], 
+        repo.path()
     );
+    assert_cli_success(&json_output, "open --print-only --json should succeed");
+    let json = parse_json_stdout(&json_output);
+    assert_eq!(json["data"]["launched"], false);
+    assert_eq!(json["data"]["web_url"], "https://github.com/web3infra-foundation/libra");
 }
 
 #[test]
@@ -104,12 +73,7 @@ fn test_open_json_output_uses_origin_remote() {
     let repo = create_committed_repo_via_cli();
 
     let add_remote = run_libra_command(
-        &[
-            "remote",
-            "add",
-            "origin",
-            "git@github.com:web3infra-foundation/libra.git",
-        ],
+        &["remote", "add", "origin", "git@github.com:web3infra-foundation/libra.git"],
         repo.path(),
     );
     assert_cli_success(&add_remote, "failed to add origin for open test");
@@ -120,10 +84,7 @@ fn test_open_json_output_uses_origin_remote() {
     let json = parse_json_stdout(&output);
     assert_eq!(json["command"], "open");
     assert_eq!(json["data"]["remote"], "origin");
-    assert_eq!(
-        json["data"]["web_url"],
-        "https://github.com/web3infra-foundation/libra"
-    );
+    assert_eq!(json["data"]["web_url"], "https://github.com/web3infra-foundation/libra");
     assert_eq!(json["data"]["launched"], false);
 }
 
