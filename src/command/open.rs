@@ -105,7 +105,17 @@ pub async fn execute_safe(args: OpenArgs, output: &OutputConfig) -> CliResult<()
     }
 
     if is_print_only {
-        println!("{}", web_url);
+        if output.is_json() {
+            let open_output = OpenOutput {
+                remote: resolution.remote,
+                remote_url: resolution.remote_url,
+                web_url: web_url.clone(),
+                launched: false,
+            };
+            emit_json_data("open", &open_output, output)?;
+        } else {
+            println!("{}", web_url);
+        }
         return Ok(());
     }
 
